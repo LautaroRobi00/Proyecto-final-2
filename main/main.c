@@ -41,41 +41,29 @@ void Config_SPI(void);
 bool read_dht11(uint8_t *humidity, uint8_t *temperature);
 uint32_t compPress(int32_t adc_P);
 void read_press_comp(void);
-void read_sensors(char *data_buffer);
-void LCD_Display(const char *line1, const char *line2);
+void read_sensors();
+void LCD_Display1(float temperature, float humidity, float pressure);
 
 int main() {
-    stdio_init_all(); // Inicializar I/O para USB Serial
+    stdio_init_all();
     Config_Uart();
     Config_I2C();
     Config_SPI();
     LCD_PICO_INIT_I2C();
     LCD_PICO_Clear();
 
-    // Inicializar sensores
     gpio_init(DHT_PIN);
     gpio_pull_up(DHT_PIN);
     read_press_comp();
 
-    // Configurar el BMP280 (presión activa, modo normal)
     uint8_t data[2] = {0xF4 & 0x7F, 0x27};
     gpio_put(CS, 0);
     spi_write_blocking(SPI_PORT, data, 2);
     gpio_put(CS, 1);
 
-    char buffer[64];
-
     while (true) {
-        read_sensors(buffer);
-
-        // Mostrar datos en UART
-        uart_puts(UART_ID, buffer);
-        uart_puts(UART_ID, "\n");
-
-        // Mostrar datos en LCD
-        LCD_Display("Sensores:", buffer);
-
-        sleep_ms(3000); // Actualizar cada 3 segundos
+        read_sensors();
+        sleep_ms(3000);
     }
 }
 
@@ -181,7 +169,7 @@ void read_press_comp() {
     dig_P9 = buffer[22] | (buffer[23] << 8);
 }
 
-void read_sensors(char *data_buffer) {
+void read_sensors() {
     uint8_t humidity = 0, temperature = 0;
     uint8_t reg, buffer[6];
     int32_t rawpress, pressure = 0;
@@ -196,16 +184,32 @@ void read_sensors(char *data_buffer) {
         rawpress = ((uint32_t)buffer[0] << 12) | ((uint32_t)buffer[1] << 4) | ((uint32_t)buffer[2] >> 4);
         pressure = compPress(rawpress);
 
-        sprintf(data_buffer, "T:%dC H:%d%% P:%.2fhPa", temperature, humidity, pressure / 100.0);
+        // Mostrar datos en UART
+        char buffer_uart[64];
+        snprintf(buffer_uart, sizeof(buffer_uart), "T:%dC H:%d%% P:%.2fhPa", temperature, humidity, pressure / 100.0);
+        uart_puts(UART_ID, buffer_uart);
+        uart_puts(UART_ID, "\n");
+
+        // Mostrar datos en LCD
+        LCD_Display1( temperature,  humidity,  pressure);
     } else {
-        sprintf(data_buffer, "Error leyendo sensores");
+        uart_puts(UART_ID, "Error leyendo sensores\n");
+        LCD_Display1(0, 0, 0); // Mostrar ceros o mensaje de error
     }
 }
 
-void LCD_Display(const char *line1, const char *line2) {
+void LCD_Display1(float temperature, float humidity, float pressure) {
     LCD_PICO_Clear();
+
+    // Primera fila: Temperatura y Humedad
     LCD_PICO_SET_CURSOR(1, 0);
+    char line1[16];
+    snprintf(line1, sizeof(line1), "T:%dC H:%d%%", (int)temperature, (int)humidity);
     LCD_PICO_PRINT_STRINGi2c(line1);
-    LCD_PICO_SET_CURSOR(1, 1);
+
+    // Segunda fila: Presión
+    LCD_PICO_SET_CURSOR(0, 1);
+    char line2[16];
+    snprintf(line2, sizeof(line2), "P:%.2fhPa", pressure / 100.0);
     LCD_PICO_PRINT_STRINGi2c(line2);
 }
